@@ -87,8 +87,21 @@ const AnalysisSchema = new mongoose.Schema({
   savedToJournal: { type: Boolean, default: false }
 });
 
+// Add Chat History Schema
+const ChatHistorySchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  sessionId: String,
+  messages: [{
+    role: { type: String, enum: ['user', 'bot'] },
+    content: String,
+    timestamp: { type: Date, default: Date.now }
+  }],
+  createdAt: { type: Date, default: Date.now }
+});
+
 const User = mongoose.model('User', UserSchema);
 const Analysis = mongoose.model('Analysis', AnalysisSchema);
+const ChatHistory = mongoose.model('ChatHistory', ChatHistorySchema);
 
 // Auth middleware
 const authMiddleware = async (req, res, next) => {
@@ -258,6 +271,91 @@ function generateFallbackAnalysis(companyName) {
     executiveSummary: "Promising early-stage startup with solid fundamentals. Focus on customer acquisition and product differentiation will be key to success."
   };
 }
+
+// Chatbot Service
+const ChatbotService = {
+  systemPrompt: `You are a knowledgeable startup advisor specializing in the Indian and global startup ecosystem.
+  Focus on: idea validation, market analysis, funding strategies, business models, growth hacking, and product-market fit.
+  Keep responses concise (under 150 words), practical, and actionable. Be encouraging but realistic.
+  When relevant, provide Indian market context and examples.`,
+
+  async processMessage(userMessage, userId = null) {
+    try {
+      // Create context-aware prompt
+      const prompt = `
+        ${this.systemPrompt}
+
+        User Question: ${userMessage}
+
+        Provide helpful startup advice. If the question is about using Startoscope, explain our analysis features.
+      `;
+
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const botResponse = response.text();
+
+      // Save to chat history if user is logged in
+      if (userId) {
+        await this.saveChatHistory(userId, userMessage, botResponse);
+      }
+
+      return botResponse;
+    } catch (error) {
+      console.error('Chatbot AI error:', error);
+      return this.getFallbackResponse(userMessage);
+    }
+  },
+
+  async saveChatHistory(userId, userMessage, botResponse) {
+    try {
+      // Find or create chat session
+      let chatSession = await ChatHistory.findOne({
+        userId,
+        createdAt: { $gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } // Same day
+      });
+
+      if (!chatSession) {
+        chatSession = new ChatHistory({
+          userId,
+          sessionId: Date.now().toString(),
+          messages: []
+        });
+      }
+
+      // Add messages
+      chatSession.messages.push(
+        { role: 'user', content: userMessage },
+        { role: 'bot', content: botResponse }
+      );
+
+      await chatSession.save();
+    } catch (error) {
+      console.error('Chat history save error:', error);
+    }
+  },
+
+  getFallbackResponse(message) {
+    const lowerMessage = message.toLowerCase();
+
+    if (lowerMessage.includes('validate') || lowerMessage.includes('idea')) {
+      return "To validate your startup idea: 1) Talk to 20+ potential customers, 2) Identify the specific problem, 3) Test willingness to pay, 4) Build a landing page, 5) Find similar successful startups. Use our analysis tool for detailed validation!";
+    }
+
+    if (lowerMessage.includes('funding') || lowerMessage.includes('investor')) {
+      return "Indian funding stages: Friends & Family (₹10-25L) → Angel (₹25L-2Cr) → Seed (₹2-10Cr) → Series A (₹10-50Cr). Focus on traction first. Our analysis tool can assess your funding readiness!";
+    }
+
+    if (lowerMessage.includes('market') || lowerMessage.includes('research')) {
+      return "For market research: Use Google Trends, check NASSCOM/IBEF reports, analyze competitors on Crunchbase, survey your audience. Upload your research to our analyzer for AI-powered insights!";
+    }
+
+    if (lowerMessage.includes('mvp') || lowerMessage.includes('product')) {
+      return "Build MVP in 4-8 weeks: Focus on ONE core feature, use no-code tools for speed, launch to 10 beta users first. Our analysis can help prioritize features based on market needs.";
+    }
+
+    return "I can help with startup questions! Ask about idea validation, funding, market research, MVPs, or business models. For detailed analysis, use our main tool to upload your pitch deck or business plan.";
+  }
+};
 
 // Routes
 
@@ -470,15 +568,92 @@ app.delete('/api/journal/:id', authMiddleware, async (req, res) => {
   }
 });
 
+// Chatbot Routes
+app.post('/api/chat', async (req, res) => {
+  try {
+    const { message } = req.body;
+
+    if (!message || message.trim().length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Message is required'
+      });
+    }
+
+    // Get user ID if authenticated (optional)
+    const authHeader = req.header('Authorization');
+    let userId = null;
+
+    if (authHeader) {
+      try {
+        const token = authHeader.replace('Bearer ', '');
+        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+        userId = decoded.userId;
+      } catch (e) {
+        // User not authenticated, continue without userId
+      }
+    }
+
+    // Process message
+    const response = await ChatbotService.processMessage(message, userId);
+
+    res.json({
+      success: true,
+      response,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Chat API error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Chat service temporarily unavailable',
+      response: ChatbotService.getFallbackResponse('')
+    });
+  }
+});
+
+// Get chat history (for logged-in users)
+app.get('/api/chat/history', authMiddleware, async (req, res) => {
+  try {
+    const chatHistory = await ChatHistory.find({
+      userId: req.user._id
+    })
+    .sort({ createdAt: -1 })
+    .limit(10);
+
+    res.json({
+      success: true,
+      history: chatHistory
+    });
+  } catch (error) {
+    console.error('Chat history error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch chat history'
+    });
+  }
+});
+
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ 
+  res.json({
     status: 'healthy',
+    features: {
+      chat: 'active',
+      analysis: 'active',
+      auth: 'active'
+    },
     timestamp: new Date().toISOString()
   });
 });
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`
+  🚀 Startoscope Server Running
+  📍 Port: ${PORT}
+  💬 Chatbot: Active
+  🔗 URL: http://localhost:${PORT}
+  `);
 });
