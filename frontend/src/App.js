@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { TrendingUp, Upload, FileText, Briefcase, Target, DollarSign, Zap, Brain, Diamond, BookOpen, Rocket, AlertTriangle, LogOut, User, Download, Save } from 'lucide-react';
 import jsPDF from 'jspdf';
+import Chatbot from './components/Chatbot';
 import './App.css';
 
 const API_BASE = 'http://localhost:3001/api';
@@ -352,6 +353,9 @@ function App() {
 
   return (
     <div className="app">
+      {/* Add Chatbot Component */}
+      <Chatbot />
+
       {/* Navigation */}
       <nav className="navbar">
         <div className="nav-container">
