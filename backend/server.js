@@ -21,7 +21,7 @@ const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
 // Middleware
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: process.env.REACT_APP_API_URL || 'http://localhost:3000',
   credentials: true
 }));
 app.use(express.json());
