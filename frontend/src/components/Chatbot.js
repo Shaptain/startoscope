@@ -11,7 +11,7 @@ const Chatbot = () => {
     {
       id: 1,
       type: 'bot',
-      text: "Hi! 👋 I'm your startup advisor. Ask me about business ideas, market analysis, funding strategies, or anything startup-related!",
+      text: "Hi! I'm your startup advisor. Ask me about business ideas, market analysis, funding strategies, or anything startup-related!",
       timestamp: new Date()
     }
   ]);
